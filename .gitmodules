@@ -1,0 +1,3 @@
+[submodule "psi4"]
+	path = psi4
+	url = https://github.com/jasonrig/psi4.git

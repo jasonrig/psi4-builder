@@ -1,0 +1,6 @@
+# Build files and release artifacts stay local.
+/build/
+*.pkg
+*.oci.tar
+*.log
+.DS_Store

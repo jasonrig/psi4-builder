@@ -1,0 +1,13 @@
+# Keep the source context separate from local builds and Git metadata.
+.git
+.env
+.env.*
+.venv
+venv
+build
+build-*
+cmake-build-*
+**/__pycache__
+**/*.pyc
+*.pkg
+*.oci.tar
