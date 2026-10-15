@@ -811,19 +811,23 @@ BUNDLE_PYTHON
         VECLIB_MAXIMUM_THREADS=1 "$psi4_runtime/bin/psi4-python"
     env -i HOME="$HOME" PATH=/usr/bin:/bin "$psi4_runtime/bin/psi4" --version
     find "$psi4_runtime" -type d -name __pycache__ -prune -exec rm -rf '{}' +
-    # Create command links for a user installation when ~/.local/bin exists.
+    # Create command links when the command directory exists.
     mkdir -p "$psi4_pkg_dir/scripts"
     cat > "$psi4_pkg_dir/scripts/postinstall" <<'POSTINSTALL'
 #!/bin/sh
-# The installer passes the installation directory as the second argument.
-# Leave system installations and existing command names unchanged.
-[ "$2" != / ] && [ "$(/usr/bin/id -u)" -ne 0 ] || exit 0
-psi4_command_dir="$2/.local/bin"
+# The installer passes the installation directory and target volume as arguments.
+psi4_install_dir=${2%/}
+if [ "$psi4_install_dir" = "${3%/}" ]; then
+    psi4_command_dir="$psi4_install_dir/usr/local/bin"
+else
+    [ "$(/usr/bin/id -u)" -ne 0 ] || exit 0
+    psi4_command_dir="$psi4_install_dir/.local/bin"
+fi
 [ -d "$psi4_command_dir" ] || exit 0
 for psi4_command in psi4 psi4-python; do
     psi4_link="$psi4_command_dir/$psi4_command"
     if [ -e "$psi4_link" ] || [ -L "$psi4_link" ]; then continue; fi
-    /bin/ln -sh "$2/Library/Psi4/current/bin/$psi4_command" "$psi4_link" \
+    /bin/ln -sh "$psi4_install_dir/Library/Psi4/current/bin/$psi4_command" "$psi4_link" \
         || printf 'Psi4: Could not create command link: %s\n' "$psi4_link" >&2
 done
 exit 0
@@ -835,10 +839,10 @@ POSTINSTALL
         --ownership recommended "$psi4_pkg_dir/runtime.pkg"
     cat > "$psi4_pkg_dir/conclusion.html" <<'HTML'
 <html><body><h2>Psi4 installation is complete</h2>
-<p>For a user installation, command links are added to ~/.local/bin if that directory exists and the command names are not in use. Add ~/.local/bin to PATH if required.</p>
-<p>If you cannot use these links, add this line to your shell configuration file:</p>
+<p>Command links are added to ~/.local/bin for a user installation, or /usr/local/bin for all users, if the directory exists and the command names are not in use. Add the command directory to PATH if required.</p>
+<p>If you cannot use the links for a user installation, add this line to your shell configuration file:</p>
 <pre>export PATH="$HOME/Library/Psi4/current/bin:$PATH"</pre>
-<p>If you installed Psi4 for all users, add this line to your shell configuration file:</p>
+<p>If you cannot use the links for an all-user installation, add this line to your shell configuration file:</p>
 <pre>export PATH="/Library/Psi4/current/bin:$PATH"</pre>
 <p>Run <code>psi4 input.dat</code> to use a Psi4 input file.</p>
 <p>Run <code>psi4-python script.py</code> to use the Python API.</p>
