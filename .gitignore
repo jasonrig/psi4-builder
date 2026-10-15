@@ -4,3 +4,8 @@
 *.oci.tar
 *.log
 .DS_Store
+
+# Local Python check files.
+__pycache__/
+.mypy_cache/
+.ruff_cache/

@@ -100,6 +100,9 @@ Use `--package-only` with the same settings to package a completed installer bui
 Use `--no-update-tools` to retain installed build tools. Keep the build directory
 for incremental builds or packaging; installed runtimes work independently of it.
 
+See [native performance tests](benchmarks/README.md) to compare build variants
+and runtime thread settings.
+
 ## Update the source
 
 Start with a clean submodule, then select the source to test:

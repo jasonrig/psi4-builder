@@ -1,0 +1,58 @@
+[tool.mypy]
+strict = true
+disallow_any_unimported = true
+disallow_any_expr = true
+disallow_any_decorated = true
+disallow_any_explicit = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+strict_optional = true
+strict_bytes = true
+warn_unreachable = true
+warn_unused_configs = true
+strict_equality_for_none = true
+enable_error_code = [
+    "ignore-without-code",
+    "redundant-expr",
+    "truthy-bool",
+    "truthy-iterable",
+    "unused-awaitable",
+    "explicit-override",
+    "mutable-override",
+    "exhaustive-match",
+    "possibly-undefined",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "I", "UP", "B", "A", "C4", "SIM", "PIE", "N", "ANN",
+    "S", "DTZ", "T10", "T20", "PT", "RET", "ARG", "PTH", "ASYNC", "PERF",
+    "FURB", "C90", "PL", "PGH", "RUF", "D", "TID",
+    "DOC102", "DOC201", "DOC202", "DOC402", "DOC403", "DOC501", "DOC502",
+]
+# These checks conflict with the formatter. Google convention excludes D203.
+ignore = ["E111", "E114", "E117", "W191", "D206", "D300"]
+preview = true
+explicit-preview-rules = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pydoclint]
+ignore-one-line-docstrings = false
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# This runner prints progress to the terminal. Tests use the standard unittest API.
+"run.py" = ["T201"]
+"test_run.py" = ["PT009", "PT027"]
+
+[tool.ruff.format]
+preview = false
+docstring-code-format = true
