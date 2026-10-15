@@ -92,6 +92,9 @@ Use `--build-dir`, `--install-dir`, and `--pkg-output` to change these paths.
 runtime under the build directory and do not create a permanent installation.
 The installer includes Python and dependencies. It supports one user without
 root access or all users with administrator access. It has no Apple notarization.
+User installations add `psi4` and `psi4-python` links in `~/.local/bin` if that
+directory exists and the command names are unused. Add that directory to your
+`PATH` if required.
 
 Use `--package-only` with the same settings to package a completed installer build.
 Use `--no-update-tools` to retain installed build tools. Keep the build directory

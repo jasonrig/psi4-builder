@@ -811,12 +811,32 @@ BUNDLE_PYTHON
         VECLIB_MAXIMUM_THREADS=1 "$psi4_runtime/bin/psi4-python"
     env -i HOME="$HOME" PATH=/usr/bin:/bin "$psi4_runtime/bin/psi4" --version
     find "$psi4_runtime" -type d -name __pycache__ -prune -exec rm -rf '{}' +
+    # Create command links for a user installation when ~/.local/bin exists.
+    mkdir -p "$psi4_pkg_dir/scripts"
+    cat > "$psi4_pkg_dir/scripts/postinstall" <<'POSTINSTALL'
+#!/bin/sh
+# The installer passes the installation directory as the second argument.
+# Leave system installations and existing command names unchanged.
+[ "$2" != / ] && [ "$(/usr/bin/id -u)" -ne 0 ] || exit 0
+psi4_command_dir="$2/.local/bin"
+[ -d "$psi4_command_dir" ] || exit 0
+for psi4_command in psi4 psi4-python; do
+    psi4_link="$psi4_command_dir/$psi4_command"
+    if [ -e "$psi4_link" ] || [ -L "$psi4_link" ]; then continue; fi
+    /bin/ln -sh "$2/Library/Psi4/current/bin/$psi4_command" "$psi4_link" \
+        || printf 'Psi4: Could not create command link: %s\n' "$psi4_link" >&2
+done
+exit 0
+POSTINSTALL
+    chmod +x "$psi4_pkg_dir/scripts/postinstall"
     /usr/bin/pkgbuild --root "$psi4_stage" --install-location / \
+        --scripts "$psi4_pkg_dir/scripts" \
         --identifier "org.psicode.psi4.$psi4_arch" --version "$psi4_pkg_version" \
         --ownership recommended "$psi4_pkg_dir/runtime.pkg"
     cat > "$psi4_pkg_dir/conclusion.html" <<'HTML'
 <html><body><h2>Psi4 installation is complete</h2>
-<p>If you installed Psi4 for your user account, add this line to your shell configuration file:</p>
+<p>For a user installation, command links are added to ~/.local/bin if that directory exists and the command names are not in use. Add ~/.local/bin to PATH if required.</p>
+<p>If you cannot use these links, add this line to your shell configuration file:</p>
 <pre>export PATH="$HOME/Library/Psi4/current/bin:$PATH"</pre>
 <p>If you installed Psi4 for all users, add this line to your shell configuration file:</p>
 <pre>export PATH="/Library/Psi4/current/bin:$PATH"</pre>
