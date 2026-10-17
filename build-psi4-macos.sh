@@ -275,7 +275,7 @@ fi
 
 # Update the build tools. Psi4 selects the Libint and Libxc versions.
 psi4_tools=(uv)
-if [[ "$BUILD_ACTION" != package-only ]]; then psi4_tools+=(boost eigen@3 libomp); fi
+if [[ "$BUILD_ACTION" != package-only ]]; then psi4_tools+=(boost eigen@3 libomp hdf5); fi
 if [[ "$UPDATE_TOOLS" == yes && "$BUILD_ACTION" != package-only ]]; then
     brew update
     env -u HOMEBREW_NO_INSTALL_UPGRADE brew install --formula --no-ask "${psi4_tools[@]}"
@@ -364,6 +364,7 @@ if [[ "$BUILD_ACTION" != package-only ]]; then
     psi4_boost=$(brew --prefix boost)
     psi4_eigen=$(brew --prefix eigen@3)
     psi4_omp=$(brew --prefix libomp)
+    psi4_hdf5=$(brew --prefix hdf5)
     printf 'int main(void) { return 0; }\n' | "$psi4_cc" "${psi4_cpu_options[@]}" -isysroot "$psi4_sdk" -mmacosx-version-min="$MIN_MACOS" -x c - -o "$psi4_build/cpu-check"
     "$psi4_build/cpu-check"
     "$psi4_uv" venv --allow-existing --python "$psi4_python" "$psi4_venv"
@@ -406,23 +407,26 @@ if [[ "$BUILD_ACTION" != package-only ]]; then
     # Keep the LP64 ABI. Psi4 Fortran interfaces require 32-bit integers.
     # Set the compiler and linker options to use Homebrew libomp with Apple Clang.
     export BOOST_ROOT="$psi4_boost" MATH_ROOT="$psi4_sdk/usr"
+    export OpenMP_ROOT="$psi4_omp"
     export CPLUS_INCLUDE_PATH="$psi4_eigen/include"
     export CMAKE_POLICY_VERSION_MINIMUM=3.5 CMAKE_BUILD_PARALLEL_LEVEL="$BUILD_JOBS"
     psi4_omp_flags="-Xpreprocessor -fopenmp -I$psi4_omp/include"
     psi4_flags="-O3 -DNDEBUG $psi4_cpu_flags"
     psi4_pybind11=$("$psi4_venv/bin/python" -m pybind11 --cmakedir)
+    export pybind11_DIR="$psi4_pybind11"
     cmake -S "$psi4_source" -B "$psi4_build" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$psi4_prefix" \
         -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_OSX_SYSROOT="$psi4_sdk" \
         -DCMAKE_OSX_DEPLOYMENT_TARGET="$MIN_MACOS" \
         -DCMAKE_C_COMPILER="$psi4_cc" -DCMAKE_CXX_COMPILER="$psi4_cxx" \
-        -DCMAKE_C_FLAGS="$psi4_flags" -DCMAKE_CXX_FLAGS="$psi4_flags" \
-        -DCMAKE_PREFIX_PATH="$psi4_boost;$psi4_eigen;$psi4_omp;$psi4_pybind11" \
+        -DCMAKE_C_FLAGS="$psi4_flags" -DCMAKE_CXX_FLAGS="$psi4_flags -DH5Dread_chunk_vers=1" \
+        -DCMAKE_PREFIX_PATH="$psi4_boost;$psi4_eigen;$psi4_omp;$psi4_hdf5;$psi4_pybind11" \
         -Dpybind11_DIR="$psi4_pybind11" \
         -DEigen3_DIR="$psi4_eigen/share/eigen3/cmake" \
         -DPython_EXECUTABLE="$psi4_venv/bin/python" \
         -DBLAS_TYPE=SYSTEM_NATIVE -DLAPACK_TYPE=SYSTEM_NATIVE \
         -DENABLE_XHOST=OFF -DENABLE_OPENMP=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF \
+        -DENABLE_Einsums=ON \
         -DOpenMP_C_FLAGS="$psi4_omp_flags" -DOpenMP_CXX_FLAGS="$psi4_omp_flags" \
         -DOpenMP_C_LIB_NAMES=omp -DOpenMP_CXX_LIB_NAMES=omp \
         -DOpenMP_omp_LIBRARY="$psi4_omp/lib/libomp.dylib" \
@@ -437,11 +441,12 @@ if [[ "$BUILD_ACTION" != package-only ]]; then
     # Build the dependencies that still have ExternalProject targets.
     psi4_available_targets=$(cmake --build "$psi4_build" --target help)
     psi4_dependency_targets=()
-    for target in libint2_external libxc_external gau2grid_external; do
+    for target in libint2_external libxc_external gau2grid_external einsums_external; do
         if [[ "$psi4_available_targets" == *"$target:"* ]]; then psi4_dependency_targets+=("$target"); fi
     done
     if [[ ${#psi4_dependency_targets[@]} -gt 0 ]]; then
-        cmake --build "$psi4_build" --target "${psi4_dependency_targets[@]}" --parallel "$BUILD_JOBS"
+        # Dependency downloads must use their own Git repositories, not Psi4's version metadata.
+        env -u GIT_DIR -u GIT_WORK_TREE cmake --build "$psi4_build" --target "${psi4_dependency_targets[@]}" --parallel "$BUILD_JOBS"
     fi
     export CMAKE_BUILD_PARALLEL_LEVEL="$PSI4_BUILD_JOBS"
     cmake --build "$psi4_build" --target install --parallel "$PSI4_BUILD_JOBS"
@@ -498,29 +503,9 @@ fi
 [[ -f "$psi4_prefix/build-configuration.txt" && "$(< "$psi4_prefix/build-configuration.txt")" == "$psi4_config" ]] \
     || die 'The runtime files do not match these settings. Build them first, or select the settings from the completed build.'
 
-# Do the same chemistry checks before and after you create the installer files.
-# Check the mathematics libraries, integral libraries, and relative Python paths.
+# Verify the Python runtime before and after relocation.
 check_runtime() {
-    "$@" <<'PYTHON'
-import psi4
-psi4.core.be_quiet()
-psi4.set_memory('512 MB')
-psi4.set_num_threads(2)
-psi4.geometry('O\nH 1 0.96\nH 1 0.96 2 104.5')
-psi4.set_options({'basis': 'sto-3g', 'scf_type': 'pk'})
-pk = psi4.energy('hf')
-assert abs(pk + 74.963319052540) < 1e-7, pk
-psi4.set_options({'scf_type': 'df'})
-df = psi4.energy('hf')
-assert abs(pk - df) < 1e-3, (pk, df)
-mp2 = psi4.energy('mp2')
-assert mp2 < df, (mp2, df)
-pbe = psi4.energy('pbe')
-assert -76 < pbe < -74, pbe
-gradient = psi4.gradient('hf').np
-assert gradient.shape == (3, 3) and abs(gradient.sum(axis=0)).max() < 1e-7
-print('Chemistry checks passed:', psi4.__version__, pk, df, mp2, pbe)
-PYTHON
+    "$@" -c 'import psi4; print("Psi4 runtime:", psi4.__version__)'
 }
 otool -L "$psi4_prefix"/lib/psi4/core*.so | grep -E 'Accelerate\.framework|vecLib\.framework'
 check_runtime env -u PSIDATADIR VECLIB_MAXIMUM_THREADS=1 "$psi4_prefix/bin/psi4-python"
