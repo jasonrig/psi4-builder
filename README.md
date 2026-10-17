@@ -79,6 +79,7 @@ The script uses uv to obtain CPython and create a virtual environment.
 `--python` accepts `latest`, an available CPython version, or an executable path.
 Clang detects the CPU by default; `--cpu portable` supports other CPU generations
 of the same architecture. Native builds use Accelerate and Homebrew libomp.
+Both native and Docker builds enable MP2-F12 through Einsums and HDF5.
 
 | Output | Default location |
 | --- | --- |

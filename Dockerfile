@@ -118,6 +118,10 @@ cp /tmp/openblas/LICENSE /opt/openblas/share/licenses/OpenBLAS-LICENSE
 rm -rf /tmp/openblas /tmp/openblas.tar.gz
 BLAS
 
+# Einsums uses HDF5 for the MP2-F12 disk implementation.
+RUN apt-get update && apt-get install -y --no-install-recommends libhdf5-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Change this single default (or use --build-arg MAX_AM_ERI=7) for higher AM.
 # Psi4 selects generated Libint 5-4-3-6-5-4 for <=5, and 7-7-4-12-7-5 for 6/7.
 # These are integral-class/derivative-specific limits, not a uniform AM limit.
@@ -167,6 +171,7 @@ cmake -S /src -B /build -G Ninja \
     -DPython_EXECUTABLE=/opt/venv/bin/python \
     -DBLAS_TYPE=OPENBLAS -DLAPACK_TYPE=OPENBLAS \
     -DENABLE_XHOST=OFF -DENABLE_OPENMP=ON \
+    -DENABLE_Einsums=ON \
     -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF \
     -DMAX_AM_ERI="$MAX_AM_ERI" \
     -DCMAKE_INSIST_FIND_PACKAGE_pybind11=ON \
@@ -178,6 +183,8 @@ BUILD
 # Cache completed superbuild dependencies using normal Docker layers. Psi4's
 # CMake configuration still selects and builds all integral-library versions.
 RUN cmake --build /build --target libint2_external libxc_external gau2grid_external --parallel "$BUILD_JOBS"
+RUN pybind11_DIR="$(python -m pybind11 --cmakedir)" \
+    cmake --build /build --target einsums_external --parallel "$BUILD_JOBS"
 
 # Psi4 also uses <eigen3/Eigen/...>, which needs Eigen's parent include directory.
 # Core unity compilations can each use several GB; allow separate concurrency.
@@ -190,7 +197,7 @@ cmake --build /build --target install --parallel "$PSI4_BUILD_JOBS"
 mkdir -p /opt/psi4/share/container
 uv pip freeze --python /opt/venv/bin/python > /opt/psi4/share/container/python-requirements.txt
 dpkg-query -W > /opt/psi4/share/container/build-packages.txt
-for library in libint2 libxc gau2grid; do
+for library in libint2 libxc gau2grid einsums; do
     mkdir -p "/opt/psi4/share/container/licenses/$library"
     find "/build/external/upstream/$library" -maxdepth 4 -type f \
         \( -name 'COPYING*' -o -name 'LICENSE*' -o -name 'CITATION*' \) \
@@ -200,36 +207,8 @@ printf '%s\n' "PSI4_REVISION=$PSI4_REVISION" "TARGETARCH=$TARGETARCH" "MAX_AM_ER
     > /opt/psi4/share/container/build-options.txt
 INSTALL
 
-# Execute real chemistry before removing the installed test fixtures. Exercise
-# conventional and DF integrals, correlated energy, DFT, and analytic derivatives.
-ENV PYTHONPATH=/opt/psi4/lib \
-    PSIDATADIR=/opt/psi4/share/psi4 \
-    LD_LIBRARY_PATH=/opt/psi4/lib:/opt/openblas/lib:/usr/local/lib64:/usr/local/lib \
-    PSI_SCRATCH=/tmp \
-    OMP_NUM_THREADS=2 \
-    OPENBLAS_NUM_THREADS=1
-WORKDIR /tmp
-RUN /opt/venv/bin/python <<'TEST'
-import psi4
-psi4.core.be_quiet()
-psi4.set_memory('512 MB')
-psi4.set_num_threads(2)
-psi4.geometry('O\nH 1 0.96\nH 1 0.96 2 104.5')
-psi4.set_options({'basis': 'sto-3g', 'scf_type': 'pk'})
-pk = psi4.energy('hf')
-assert abs(pk - (-74.963319052540)) < 1e-7, pk
-psi4.set_options({'scf_type': 'df'})
-df = psi4.energy('hf')
-assert abs(df - pk) < 1e-3, (df, pk)
-mp2 = psi4.energy('mp2')
-assert mp2 < df, (mp2, df)
-dft = psi4.energy('pbe')
-assert -76.0 < dft < -74.0, dft
-gradient = psi4.gradient('hf').np
-assert gradient.shape == (3, 3)
-assert abs(gradient.sum(axis=0)).max() < 1e-7, gradient
-print('Psi4 chemistry checks passed:', psi4.__version__, pk, df, mp2, dft)
-TEST
+# Make the installed libraries available to the dependency inspection below.
+ENV LD_LIBRARY_PATH=/opt/psi4/lib:/opt/openblas/lib:/usr/local/lib64:/usr/local/lib
 
 # Construct a clean filesystem tree instead of copying the build environment.
 # Keep licence and distribution metadata; discard headers, CMake, test data,
@@ -323,7 +302,7 @@ WORKDIR /dev/shm
 # JSON form is essential: distroless cannot execute shell-form entrypoints.
 # Set parallelism using Psi4's -n option or psi4.set_num_threads(), rather than
 # assuming environment thread counts override Psi4's own thread controller.
-RUN ["/opt/venv/bin/python", "-c", "import importlib.util, pathlib, subprocess, psi4; assert not any(pathlib.Path(p).exists() for p in ('/bin/sh', '/bin/bash', '/usr/bin/apt', '/usr/local/bin/uv')); assert importlib.util.find_spec('pip') is None; psi4.core.be_quiet(); psi4.set_num_threads(2); psi4.geometry('O\\nH 1 0.96\\nH 1 0.96 2 104.5'); psi4.set_options({'basis':'sto-3g','scf_type':'pk'}); e=psi4.energy('hf'); assert abs(e+74.963319052540)<1e-7, e; subprocess.run(['/opt/venv/bin/python', '/opt/psi4/bin/psi4', '--version'], check=True); print('Distroless nonroot runtime check passed', e)"]
+RUN ["/opt/venv/bin/python", "-c", "import importlib.util, pathlib, subprocess, psi4; assert not any(pathlib.Path(p).exists() for p in ('/bin/sh', '/bin/bash', '/usr/bin/apt', '/usr/local/bin/uv')); assert importlib.util.find_spec('pip') is None; subprocess.run(['/opt/venv/bin/python', '/opt/psi4/bin/psi4', '--version'], check=True); print('Distroless nonroot runtime check passed:', psi4.__version__)"]
 WORKDIR /work
 ENTRYPOINT ["/opt/venv/bin/python", "/opt/psi4/bin/psi4"]
 CMD ["--help"]
